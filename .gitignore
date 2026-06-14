@@ -9,6 +9,7 @@ wheels/
 # Virtual environments
 .venv
 .env
+.env.local
 
 # Agent keys
-backend/agent_config.yaml
+backend/config/agent_config.yaml

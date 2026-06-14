@@ -52,9 +52,10 @@ ai-software-factory/
     │   └── band_tools.py    <-- Band.ai REST API delegation functions
     │
     └── agents/              <-- The 6 distinct Swarm Nodes
-        ├── conductor.py         # AI/ML API
+        ├── manager.py         # AI/ML API
         ├── system_architect.py  # AI/ML API
         ├── ui_coder.py          # AI/ML API
         ├── backend_coder.py     # AI/ML API
         ├── reviewer.py          # Featherless (Adversarial QA)
         └── mergemaster.py       # AI/ML API
+
