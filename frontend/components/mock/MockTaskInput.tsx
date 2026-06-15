@@ -22,7 +22,7 @@ export default function MockTaskInput({ onSessionCreated }: { onSessionCreated: 
 
   return (
     <div className="w-full max-w-4xl bg-[#0A0A0B] border border-emerald-500/30 rounded-2xl p-6 shadow-2xl relative overflow-hidden">
-      <div className="absolute top-0 left-1/2 -translate-x-1/2 w-3/4 h-1 bg-gradient-to-r from-transparent via-emerald-500/50 to-transparent blur-sm" />
+      <div className="absolute top-0 left-1/2 -translate-x-1/2 w-3/4 h-1 bg-linear-to-r from-transparent via-emerald-500/50 to-transparent blur-sm" />
       <div className="flex flex-col gap-4">
         <div className="flex items-center gap-2 mb-2">
           <Code2 className="w-5 h-5 text-emerald-400" />

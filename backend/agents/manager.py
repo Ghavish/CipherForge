@@ -48,7 +48,7 @@ async def main():
     agent_id, api_key = load_agent_config("manager")
     agent = Agent.create(adapter=adapter, agent_id=agent_id, api_key=api_key)
     
-    print("🚂 Conductor is online and awaiting user requests...")
+    print("🚂 Manager is online and awaiting user requests...")
     await agent.run()
 
 if __name__ == "__main__":
