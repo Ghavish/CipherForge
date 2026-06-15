@@ -7,7 +7,6 @@ def get_target_agent_id(role_name: str) -> str:
     """
     config_path = os.path.join(
         os.path.dirname(os.path.dirname(__file__)), 
-        'config', 
         'agent_config.yaml'
     )
     

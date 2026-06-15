@@ -5,8 +5,13 @@ import asyncio
 import requests
 from dotenv import load_dotenv
 from thenvoi import Agent
-from thenvoi.adapters import OpenAIAdapter
+from thenvoi.adapters import LangGraphAdapter
 from thenvoi.config import load_agent_config
+
+# from langchain_openai import ChatOpenAI
+from langchain_google_genai import ChatGoogleGenerativeAI
+
+from langgraph.checkpoint.memory import InMemorySaver
 
 def deploy_generated_code(project_id: str) -> str:
     """
@@ -101,7 +106,7 @@ def deploy_generated_code(project_id: str) -> str:
         return f"Partial Success: Pushed to GitHub, but Vercel API network error occurred: {str(e)}"
 
 async def main():
-    load_dotenv()
+    # load_dotenv()
 
     custom_prompt = """
     You are the Mergemaster, the deployment engine of the multi-agent swarm. 
@@ -111,22 +116,16 @@ async def main():
     3. Report the completion status back to the logging lifecycle.
     """
 
-    adapter = OpenAIAdapter(
-        model="gemini-1.5-flash", # Use the free, high-speed model
-        api_key=os.getenv("GOOGLE_AI_STUDIO_API_KEY"),
-        base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
-        custom_section=custom_prompt
+    adapter = LangGraphAdapter(
+        
+        # llm=ChatOpenAI(model="gemini-1.5-flash"),
+        llm=ChatGoogleGenerativeAI(model="gemini-1.5-flash"),
+        
+        custom_section=custom_prompt,
+        additional_tools=[deploy_generated_code]
     )
 
-    # adapter = OpenAIAdapter(
-    #     model="meta-llama/meta-llama-3-70b-instruct",
-    #     api_key=os.getenv("AIML_API_KEY"),
-    #     base_url="https://api.aimlapi.com/v1",
-    #     custom_section=custom_prompt,
-    #     tools=[deploy_generated_code] # Attach the execution tool directly to the agent
-    # )
-
-    agent_id, api_key = load_agent_config("mergemaster")
+    agent_id, api_key = load_agent_config("merge_master")
     agent = Agent.create(adapter=adapter, agent_id=agent_id, api_key=api_key)
     
     print("🚀 Mergemaster (GitHub + Vercel Autonomous Pipeline) is online...")

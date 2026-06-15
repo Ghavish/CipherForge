@@ -12,4 +12,4 @@ wheels/
 .env.local
 
 # Agent keys
-backend/config/agent_config.yaml
+backend/agent_config.yaml
