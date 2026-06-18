@@ -1,137 +1,274 @@
 import os
 import sys
-import subprocess
+import json
+import re
 import asyncio
 import requests
-from dotenv import load_dotenv
+import subprocess
+
 from thenvoi import Agent
 from thenvoi.adapters import LangGraphAdapter
 from thenvoi.config import load_agent_config
+from langchain_openai import ChatOpenAI
+from langchain_core.tools import tool
 
-# from langchain_openai import ChatOpenAI
-from langchain_google_genai import ChatGoogleGenerativeAI
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from langgraph.checkpoint.memory import InMemorySaver
+from tools.config_parser import get_target_agent_id
+from tools.db import append_log
 
+# --- CUSTOM LOGGING TOOL ---
+@tool
+def log_progress(project_id: str, stage: str, message: str) -> str:
+    """Use this tool to log your progress to the system UI. 
+    Args:
+        project_id: The ID of the current project.
+        stage: The current stage (e.g., 'Coding', 'Architecture', 'QA Review').
+        message: A short description of what you just completed.
+    """
+    append_log(project_id, stage, message)
+    return "Log successfully saved to the UI."
+# --------------------------------------
+
+@tool
+def write_project_files(project_id: str, project_type: str, files: str) -> str:
+    """
+    Writes generated code files to disk before deployment.
+
+    Args:
+        project_id: The project identifier (e.g. PROJ-1001).
+        project_type: Either "frontend" or "backend".
+                      Files are written to generated-projects/{project_id}-{project_type}/
+        files: A JSON string — a list of objects each with:
+               - "path": relative file path (e.g. "src/app/page.tsx")
+               - "content": full file content as a string
+
+    Returns a success message or error string.
+    """
+    if not re.match(r'^[A-Z]+-\d+$', project_id):
+        return f"Error: Invalid project_id format '{project_id}'. Expected format: PROJ-1234."
+
+    if project_type not in ["frontend", "backend"]:
+        return f"Error: project_type must be 'frontend' or 'backend', got '{project_type}'."
+
+    try:
+        file_list = json.loads(files)
+    except json.JSONDecodeError as e:
+        return f"Error: Could not parse files JSON — {str(e)}"
+
+    project_folder = os.path.join(os.getcwd(), "generated-projects", f"{project_id}-{project_type}")
+    written = []
+
+    for entry in file_list:
+        relative_path = entry.get("path")
+        content = entry.get("content")
+
+        if not relative_path or content is None:
+            return f"Error: Each entry needs 'path' and 'content'. Got: {entry}"
+
+        full_path = os.path.join(project_folder, relative_path)
+
+        if not os.path.abspath(full_path).startswith(os.path.abspath(project_folder)):
+            return f"Error: Path traversal detected for '{relative_path}'."
+
+        os.makedirs(os.path.dirname(full_path), exist_ok=True)
+
+        with open(full_path, "w", encoding="utf-8") as f:
+            f.write(content)
+
+        written.append(relative_path)
+
+    return f"Success: Wrote {len(written)} file(s) to {project_folder}: {written}"
+
+
+def _push_to_github(repo_name: str, folder: str, github_user: str, github_token: str) -> str | None:
+    """
+    Creates a GitHub repo and force-pushes the contents of folder to it.
+    Returns None on success, or an error string on failure.
+    """
+    gh_response = requests.post(
+        "https://api.github.com/user/repos",
+        headers={
+            "Authorization": f"token {github_token}",
+            "Accept": "application/vnd.github.v3+json"
+        },
+        json={
+            "name": repo_name,
+            "description": f"AI Generated — {repo_name}",
+            "private": False,
+            "auto_init": False
+        }
+    )
+
+    if gh_response.status_code not in [201, 422]:
+        return f"GitHub Error for {repo_name}: {gh_response.json().get('message')}"
+
+    # Use netrc to avoid token in process list
+    netrc_path = os.path.expanduser("~/.netrc")
+    with open(netrc_path, "w") as f:
+        f.write(f"machine github.com login {github_user} password {github_token}\n")
+    os.chmod(netrc_path, 0o600)
+
+    remote_url = f"https://github.com/{github_user}/{repo_name}.git"
+
+    git_steps = [
+        ["git", "init"],
+        ["git", "checkout", "-b", "main"],
+        ["git", "add", "."],
+        ["git", "commit", "-m", "AI Builder Automated Build"],
+        ["git", "remote", "remove", "origin"],
+        ["git", "remote", "add", "origin", remote_url],
+        ["git", "push", "-u", "origin", "main", "--force"],
+    ]
+
+    for step in git_steps:
+        result = subprocess.run(step, cwd=folder, capture_output=True, text=True)
+        if result.returncode != 0 and step[1] != "remote":
+            return f"Git Error at '{' '.join(step)}': {result.stderr}"
+
+    return None
+
+@tool
 def deploy_generated_code(project_id: str) -> str:
     """
-    Automates the entire deployment pipeline:
-    1. Dynamically creates a new GitHub repository using the GitHub API.
-    2. Initializes local git, commits files, and force-pushes to GitHub.
-    3. Triggers Vercel via its REST API to import the repo and deploy it live.
+    Deploys a generated project:
+    - Frontend (PROJ-1001-frontend) → GitHub + Vercel
+    - Backend  (PROJ-1001-backend)  → GitHub only
+
+    Call write_project_files for both frontend and backend before calling this.
+
+    Args:
+        project_id: The project identifier (e.g. PROJ-1001).
+
+    Returns a deployment summary with URLs.
     """
-    
-    # Load required environment variables
+    if not re.match(r'^[A-Z]+-\d+$', project_id):
+        return f"Error: Invalid project_id format '{project_id}'."
+
     github_token = os.getenv("GITHUB_TOKEN")
     github_user = os.getenv("GITHUB_USERNAME")
     vercel_token = os.getenv("VERCEL_TOKEN")
-    
+
     if not all([github_token, github_user, vercel_token]):
-        return "Error: Missing deployment credentials (GITHUB_TOKEN, GITHUB_USERNAME, or VERCEL_TOKEN) in environment."
-    
-    # Path where the specific project's code was generated by the Coder agents
-    project_folder = os.path.join(os.getcwd(), "generated-projects", project_id)
-    
-    if not os.path.exists(project_folder):
-        return f"Error: Project folder {project_folder} does not exist."
+        return "Error: Missing deployment credentials (GITHUB_TOKEN, GITHUB_USERNAME, or VERCEL_TOKEN)."
 
-    # Create a brand new GitHub Repository dynamically
-    github_api_url = "https://api.github.com/user/repos"
-    github_headers = {
-        "Authorization": f"token {github_token}",
-        "Accept": "application/vnd.github.v3+json"
-    }
-    github_payload = {
-        "name": project_id,
-        "description": f"AI Generated Application for {project_id}",
-        "private": False,
-        "auto_init": False
-    }
-    
-    try:
-        gh_response = requests.post(github_api_url, headers=github_headers, json=github_payload)
-        # 201 = Created, 422 = Already Exists (allows updates/re-runs)
-        if gh_response.status_code not in [201, 422]:
-            return f"GitHub API Error: Failed to create repository. Message: {gh_response.json().get('message')}"
-    except Exception as e:
-        return f"GitHub API Communication Failure: {str(e)}"
+    base = os.path.join(os.getcwd(), "generated-projects")
+    frontend_folder = os.path.join(base, f"{project_id}-frontend")
+    backend_folder = os.path.join(base, f"{project_id}-backend")
 
+    results = []
 
-    # Use local Git commands to push the generated files  
-    remote_url = f"https://{github_user}:{github_token}@github.com/{github_user}/{project_id}.git"
-    
-    git_commands = [
-        f"cd {project_folder} && git init",
-        f"cd {project_folder} && git checkout -b main",
-        f"cd {project_folder} && git add .",
-        f'cd {project_folder} && git commit -m "AI Builder Automated Build Allocation"',
-        f"cd {project_folder} && git remote remove origin || true",
-        f"cd {project_folder} && git remote add origin {remote_url}",
-        f"cd {project_folder} && git push -u origin main --force"
-    ]
-    
-    try:
-        full_git_command = " && ".join(git_commands)
-        subprocess.run(full_git_command, shell=True, check=True, capture_output=True, text=True)
-    except subprocess.CalledProcessError as e:
-        return f"Git Bash Execution Error: {e.stderr}"
-
-    # Trigger Vercel REST API to link the repository and build
-    vercel_project_name = project_id.lower() 
-    vercel_api_url = "https://api.vercel.com/v11/projects"
-    vercel_headers = {
-        "Authorization": f"Bearer {vercel_token}",
-        "Content-Type": "application/json"
-    }
-    vercel_payload = {
-        "name": vercel_project_name,
-        "framework": "nextjs", 
-        "gitRepository": {
-            "type": "github",
-            "repo": f"{github_user}/{project_id}"
-        }
-    }
-    
-    try:
-        v_response = requests.post(vercel_api_url, headers=vercel_headers, json=vercel_payload)
-        
-        # 200 or 201 confirms Vercel successfully bound the repo and initialized the pipeline
-        if v_response.status_code in [200, 201]:
-            predicted_url = f"https://{vercel_project_name}.vercel.app"
-            return f"SUCCESS: {project_id} deployed! Git push complete and Vercel pipeline active. Live URL: {predicted_url}"
+    # --- Frontend: GitHub + Vercel ---
+    if not os.path.exists(frontend_folder):
+        results.append(f"Frontend Error: folder not found at {frontend_folder}.")
+    else:
+        frontend_repo = f"{project_id}-frontend".lower()
+        err = _push_to_github(frontend_repo, frontend_folder, github_user, github_token)
+        if err:
+            results.append(err)
         else:
-            return f"Partial Success: Pushed to GitHub, but Vercel binding failed: {v_response.json().get('message')}"
-            
-    except Exception as e:
-        return f"Partial Success: Pushed to GitHub, but Vercel API network error occurred: {str(e)}"
+            v_response = requests.post(
+                "https://api.vercel.com/v11/projects",
+                headers={
+                    "Authorization": f"Bearer {vercel_token}",
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "name": frontend_repo,
+                    "framework": "nextjs",
+                    "gitRepository": {
+                        "type": "github",
+                        "repo": f"{github_user}/{frontend_repo}"
+                    }
+                }
+            )
+
+            if v_response.status_code in [200, 201]:
+                data = v_response.json()
+                aliases = data.get("alias", [])
+                live_url = f"https://{aliases[0]}" if aliases else f"https://{frontend_repo}.vercel.app"
+                results.append(f"Frontend deployed. Live URL: {live_url}")
+            else:
+                results.append(f"Frontend pushed to GitHub but Vercel failed: {v_response.json().get('message')}")
+
+    # --- Backend: GitHub only ---
+    if not os.path.exists(backend_folder):
+        # ✅ CHANGED: Do not throw an error. Acknowledge it was intentionally skipped.
+        results.append("Backend deployment skipped (no backend required).")
+    else:
+        backend_repo = f"{project_id}-backend".lower()
+        err = _push_to_github(backend_repo, backend_folder, github_user, github_token)
+        if err:
+            results.append(err)
+        else:
+            results.append(f"Backend pushed to GitHub: https://github.com/{github_user}/{backend_repo}")
+
+    return "\n".join(results)
+
 
 async def main():
-    # load_dotenv()
-
+    
     custom_prompt = """
-    You are the Mergemaster, the deployment engine of the multi-agent swarm. 
-    When the Reviewer passes code changes and gives you the final approval:
-    1. Extract the Project ID from the context.
-    2. Invoke the `deploy_generated_code` tool immediately to run the GitHub-to-Vercel delivery process.
-    3. Report the completion status back to the logging lifecycle.
+    === YOUR IDENTITY ===
+    You are the MERGE MASTER. You execute the final deployment pipeline.
+
+    === YOUR TRIGGER ===
+    A message from the QA Reviewer with [Status]: Approved, a [Project ID], [Frontend Code], and [Backend Code].
+
+    === YOUR JOB (STRICT ORDER) ===
+    1. Call the `write_project_files` tool for the frontend:
+       project_id=<id>, project_type="frontend", files=<frontend files>
+
+    2. Check the [Backend Code]. IF it is NOT "NONE", call `write_project_files` for the backend:
+       project_id=<id>, project_type="backend", files=<backend files>
+
+    3. Call the `deploy_generated_code` tool with the Project ID.
+
+   === PROGRESS LOGGING (MANDATORY) ===
+    When `deploy_generated_code` returns, you MUST use the `log_progress` tool:
+    - project_id: The ID you received.
+    - stage: "Deployment"
+    - message: "[Merge Master] Files committed and deployment pipeline executed successfully."
+
+    === THE HANDOFF ===
+    Finally, call `band_send_message` ONCE with:
+    - content: "[From]: Merge Master\\n[Project ID]: <id>\\n[Status]: DEPLOYMENT COMPLETE\\n[Result]: <full output from deploy_generated_code>"
+    - mentions: []
+
+    === HARD RULES ===
+    - Execute your tools in the exact order specified.
+    - Stop execution after `band_send_message` returns success.
     """
 
+    agent_id, api_key = load_agent_config("merge_master")
+    os.environ["BAND_API_KEY"] = api_key
+
+    # AI/ML API
     adapter = LangGraphAdapter(
-        
-        # llm=ChatOpenAI(model="gemini-1.5-flash"),
-        llm=ChatGoogleGenerativeAI(model="gemini-1.5-flash"),
-        
+        llm=ChatOpenAI(
+            model="google/gemini-2.5-flash",
+            openai_api_key=os.getenv("AIMLAPI_KEY"),
+            openai_api_base="https://api.aimlapi.com"
+        ),
         custom_section=custom_prompt,
-        additional_tools=[deploy_generated_code]
+        additional_tools=[write_project_files, deploy_generated_code,log_progress]
     )
 
-    agent_id, api_key = load_agent_config("merge_master")
+    # Featherless API
+    # adapter = LangGraphAdapter(
+    #     llm=ChatOpenAI(
+    #         # Replace with preferred Featherless model. 
+    #         model="Qwen/Qwen2.5-Coder-32B-Instruct", 
+    #         openai_api_key=os.getenv("FEATHERLESS_API_KEY"),
+    #         openai_api_base="https://api.featherless.ai/v1"
+    #     ),
+    #     custom_section=custom_prompt,
+    #     additional_tools=[write_project_files, deploy_generated_code, log_progress]
+    # )
+
     agent = Agent.create(adapter=adapter, agent_id=agent_id, api_key=api_key)
-    
-    print("🚀 Mergemaster (GitHub + Vercel Autonomous Pipeline) is online...")
+    print("Merge Master is online...")
     await agent.run()
 
 if __name__ == "__main__":
     asyncio.run(main())
-
-

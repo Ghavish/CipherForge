@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
 
 export function useSwarmStatus(projectId: string | null) {
-  // Initialize with a default empty structure
   const [status, setStatus] = useState<{ currentStage: string, logs: string[] }>({ 
     currentStage: 'Initializing', 
     logs: [] 
@@ -9,14 +8,12 @@ export function useSwarmStatus(projectId: string | null) {
 
   useEffect(() => {
     if (!projectId) {
-      // Reset if the project ID is cleared
       setStatus({ currentStage: 'Initializing', logs: [] });
       return;
     }
 
     const fetchStatus = async () => {
       try {
-        // Ensure this route matches your actual Next.js API folder name!
         const response = await fetch(`/api/swarm-status?projectId=${projectId}`);
         if (!response.ok) return;
         
@@ -27,9 +24,8 @@ export function useSwarmStatus(projectId: string | null) {
       }
     };
 
-    // Fetch immediately, then poll every 3 seconds
     fetchStatus();
-    const interval = setInterval(fetchStatus, 3000);
+    const interval = setInterval(fetchStatus, 3000); // Poll every 3 seconds
     
     return () => clearInterval(interval);
   }, [projectId]);

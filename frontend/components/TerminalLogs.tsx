@@ -11,7 +11,6 @@ interface TerminalLogsProps {
 export default function TerminalLogs({ logs, projectId }: TerminalLogsProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Auto-scroll logic
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
@@ -20,8 +19,6 @@ export default function TerminalLogs({ logs, projectId }: TerminalLogsProps) {
 
   return (
     <div className="w-full max-w-4xl bg-[#0D0221] border border-[#7B2CBF]/20 rounded-xl overflow-hidden shadow-[0_0_30px_rgba(123,44,191,0.1)] mt-6">
-      
-      {/* Header */}
       <div className="flex items-center gap-2 px-4 py-3 border-b border-[#7B2CBF]/20 bg-[#121214]">
         <Terminal className="w-4 h-4 text-[#7B2CBF]" />
         <span className="text-xs font-mono text-purple-400 uppercase tracking-widest">
@@ -29,7 +26,6 @@ export default function TerminalLogs({ logs, projectId }: TerminalLogsProps) {
         </span>
       </div>
       
-      {/* Logs Container */}
       <div ref={scrollRef} className="p-4 h-64 overflow-y-auto font-mono text-sm space-y-2 bg-[#0A0A0B] relative">
         {logs.length === 0 && <div className="text-gray-600 italic">Awaiting process execution...</div>}
         
@@ -45,7 +41,6 @@ export default function TerminalLogs({ logs, projectId }: TerminalLogsProps) {
           </motion.div>
         ))}
 
-        {/* Blinking Cursor */}
         {projectId && (
           <motion.div 
             animate={{ opacity: [1, 0, 1] }} 

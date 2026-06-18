@@ -1,38 +1,60 @@
 import { NextResponse } from 'next/server';
 
 export async function POST(request: Request) {
-  try {
-    const { prompt } = await request.json();
-    
-    // Validate that we have the necessary configuration
-    const BAND_API_KEY = process.env.BAND_API_KEY;
-    const MANAGER_UUID = process.env.MANAGER_UUID;
+  // --- Validate required env vars before doing anything ---
+  const bandApiUrl      = process.env.BAND_API_URL;
+  const bandRoomId      = process.env.BAND_ROOM_ID;
+  const bandAgentApiKey = process.env.BAND_AGENT_API_KEY;
+  const managerUuid     = process.env.MANAGER_UUID;
 
-    if (!BAND_API_KEY || !MANAGER_UUID) {
-      return NextResponse.json({ error: "Configuration missing" }, { status: 500 });
+  const missing = [
+    !bandApiUrl      && 'BAND_API_URL',
+    !bandRoomId      && 'BAND_ROOM_ID',
+    !bandAgentApiKey && 'BAND_AGENT_API_KEY',
+    !managerUuid     && 'MANAGER_UUID',
+  ].filter(Boolean);
+
+  if (missing.length > 0) {
+    return NextResponse.json(
+      { error: `Missing environment variables: ${missing.join(', ')}` },
+      { status: 500 }
+    );
+  }
+
+  try {
+    const { taskDescription } = await request.json();
+
+    if (!taskDescription?.trim()) {
+      return NextResponse.json({ error: 'taskDescription is required' }, { status: 400 });
     }
-    
-    // Trigger the Manager via Band.ai REST API
-    const response = await fetch("https://api.band.ai/v1/messages", {
-      method: "POST",
+
+    const projectId = `PROJ-${Math.floor(Math.random() * 9000) + 1000}`;
+
+    const endpoint = `${bandApiUrl}/agent/chats/${bandRoomId}/messages`;
+
+    const msgRes = await fetch(endpoint, {
+      method: 'POST',
       headers: {
-        "Authorization": `Bearer ${BAND_API_KEY}`,
-        "Content-Type": "application/json"
+        'X-API-Key': bandAgentApiKey!,
+        'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        to_agent_id: MANAGER_UUID,
-        content: `NEW_BUILD_REQUEST: ${prompt}`
-      })
+        message: {
+          content: `NEW_BUILD_REQUEST: [Project ID]: ${projectId} [Task]: ${taskDescription}`,
+          mentions: [{ id: managerUuid }],
+        },
+      }),
     });
 
-    if (!response.ok) {
-      throw new Error("Failed to contact the swarm manager.");
+    if (!msgRes.ok) {
+      const errText = await msgRes.text();
+      throw new Error(`Band API error ${msgRes.status}: ${errText}`);
     }
 
-    return NextResponse.json({ success: true, message: "Swarm initiated successfully." });
-    
-  } catch (error) {
-    console.error("Swarm Error:", error);
-    return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
+    return NextResponse.json({ projectId, roomId: bandRoomId });
+
+  } catch (error: any) {
+    console.error('[start-session] Error:', error);
+    return NextResponse.json({ error: String(error?.message ?? error) }, { status: 500 });
   }
 }

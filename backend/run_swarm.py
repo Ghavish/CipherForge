@@ -2,6 +2,7 @@ import subprocess
 import sys
 import time
 import os
+import atexit
 
 from dotenv import load_dotenv
 
@@ -13,10 +14,19 @@ env_path = os.path.join(current_dir, ".env")
 # 2. Force load_dotenv to read that exact file
 load_dotenv(dotenv_path=env_path)
 
-# DEBUG CHECK FOR GOOGLE API KEY
-# print(f"DEBUG: Looking for .env at: {env_path}")
-# print(f"DEBUG: Did we find the Gemini Key? {'YES' if os.getenv('GEMINI_API_KEY') else 'NO'}")
-# print(f"DEBUG: Did we find the Google Key? {'YES' if os.getenv('GOOGLE_API_KEY') else 'NO'}")
+# --- 1. START THE API SERVER IN THE BACKGROUND ---
+print("Starting FastAPI Backend Server on Port 8000...")
+# sys.executable ensures it uses the exact same Python environment
+api_process = subprocess.Popen([sys.executable, "api_server.py"])
+
+# --- 2. PREVENT GHOST PROCESSES ---
+# This ensures that when you press Ctrl+C to kill run_swarm, it also kills the API server
+def cleanup_api_server():
+    print("\nShutting down FastAPI server...")
+    api_process.terminate()
+    api_process.wait()
+
+atexit.register(cleanup_api_server)
 
 # List of your agent scripts based on your directory structure
 AGENT_SCRIPTS = [

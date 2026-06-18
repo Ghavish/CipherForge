@@ -12,13 +12,9 @@ export default function AgentProgress({ currentStage }: AgentProgressProps) {
 
   return (
     <div className="w-full max-w-4xl mb-8 p-8 bg-[#0D0221] border border-[#7B2CBF]/20 rounded-xl shadow-[0_0_40px_rgba(123,44,191,0.1)] relative overflow-hidden">
-      
-      {/* Cyber-Luxury Background Glow */}
       <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full h-full bg-[#7B2CBF]/5 blur-3xl pointer-events-none" />
 
       <div className="flex justify-between items-center relative z-10">
-        
-        {/* Animated Connecting Line */}
         <div className="absolute top-3 left-0 w-full h-0.5 bg-[#1f1f22] z-0 rounded-full overflow-hidden">
           <motion.div 
             className="h-full bg-linear-to-r from-[#7B2CBF] to-purple-400"
@@ -28,7 +24,6 @@ export default function AgentProgress({ currentStage }: AgentProgressProps) {
           />
         </div>
 
-        {/* Nodes */}
         {STAGES.map((stage, idx) => {
           const isActive = idx === activeIndex;
           const isPast = idx < activeIndex;

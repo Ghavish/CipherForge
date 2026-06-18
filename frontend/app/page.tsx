@@ -13,7 +13,7 @@ export default function Home() {
   const [prompt, setPrompt] = useState('');
   const [isDeploying, setIsDeploying] = useState(false);
 
-  // The custom hook handles all the polling automatically!
+  // Hook handles data syncing automatically!
   const { status } = useSwarmStatus(projectId);
 
   const handleDeploy = async () => {
@@ -22,7 +22,7 @@ export default function Home() {
     setProjectId(null); // Clear previous runs
 
     try {
-      const response = await fetch('/api/create-session', {
+      const response = await fetch('/api/start-session', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ taskDescription: prompt }),
@@ -30,7 +30,14 @@ export default function Home() {
 
       const data = await response.json();
       
-      // As soon as this is set, useSwarmStatus wakes up and starts fetching
+      // --- THE NEW DIAGNOSTIC BLOCK ---
+      if (!response.ok) {
+        alert(`API Error: ${data.error}`);
+        setIsDeploying(false);
+        return;
+      }
+      // --------------------------------
+      
       if (data.projectId) {
         setProjectId(data.projectId); 
         setPrompt(''); 
@@ -60,13 +67,12 @@ export default function Home() {
           {projectId ? (
             <div className="w-full max-w-5xl flex flex-col items-center animate-in fade-in slide-in-from-bottom-4 duration-700">
               
-              {/* Pass the synced data directly to the dumb components */}
               <AgentProgress currentStage={status.currentStage} />
               <TerminalLogs logs={status.logs} projectId={projectId} />
               
             </div>
           ) : (
-            <div className="flex-1 flex flex-col items-center justify-center opacity-40">
+            <div className="flex-1 flex flex-col items-center justify-center opacity-40 mt-20">
               <TerminalSquare className="w-16 h-16 mb-4 text-purple-500" />
               <h2 className="text-xl font-mono tracking-widest text-gray-400">AWAITING ARCHITECTURE DIRECTIVE</h2>
             </div>
@@ -74,7 +80,7 @@ export default function Home() {
 
         </div>
 
-        {/* Command Bar Interface */}
+        {/* Command Bar */}
         <div className="absolute bottom-0 left-0 w-full p-8 bg-linear-to-t from-[#0E0E0F] via-[#0E0E0F] to-transparent">
           <div className="max-w-4xl mx-auto flex items-end gap-3 bg-[#121214] border border-purple-500/20 rounded-2xl p-2 shadow-[0_0_30px_rgba(123,44,191,0.1)] focus-within:border-purple-500/50 focus-within:shadow-[0_0_40px_rgba(123,44,191,0.2)] transition-all">
             
