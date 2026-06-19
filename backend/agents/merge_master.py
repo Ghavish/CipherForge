@@ -246,7 +246,7 @@ async def main():
     # AI/ML API
     adapter = LangGraphAdapter(
         llm=ChatOpenAI(
-            model="google/gemini-2.5-flash",
+            model="deepseek/deepseek-v4-flash",
             openai_api_key=os.getenv("AIMLAPI_KEY"),
             openai_api_base="https://api.aimlapi.com"
         ),

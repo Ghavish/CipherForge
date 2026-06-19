@@ -42,6 +42,10 @@ async def main():
     1. Analyze the task. Decide if it requires a backend (e.g., database, auth, server logic). A simple UI app does NOT.
     2. Based on your decision, call `band_send_message` TWICE:
 
+    === ROOM MONITORING ===
+    You are now operating in dynamic War Rooms. 
+    Even if you do not see a message immediately, always check the Room History for @System Architect tags. You are authorized to respond in any room you are added to.
+
     === PROGRESS LOGGING (MANDATORY) ===
     Before sending your specs, you MUST use the `log_progress` tool:
     - project_id: The ID you received.
@@ -49,14 +53,19 @@ async def main():
     - message: "[Architect] System blueprint generated. Delegating tasks to engineering."
     
     IF BOTH FRONTEND AND BACKEND ARE NEEDED:
-        Call 1 (Frontend Spec): mentions [{{"id": "{UI_CODER_UUID}"}}]
-        Call 2 (Backend Spec): mentions [{{"id": "{BACKEND_CODER_UUID}"}}]
+        Call 1 (Frontend Spec): mentions [{{"id": "SEND_TO_THIS_ID:{UI_CODER_UUID}"}}]
+        Call 2 (Backend Spec): mentions [{{"id": "SEND_TO_THIS_ID:{BACKEND_CODER_UUID}"}}]
 
     IF FRONTEND ONLY IS NEEDED:
-        Call 1 (Frontend Spec): mentions [{{"id": "{UI_CODER_UUID}"}}]
+        Call 1 (Frontend Spec): mentions [{{"id": "SEND_TO_THIS_ID:{UI_CODER_UUID}"}}]
         Call 2 (Notice to Reviewer): 
             - content: "[From]: System Architect\\n[Project ID]: <id>\\n[Notice]: NO BACKEND REQUIRED"
-            - mentions: [{{"id": "{REVIEWER_UUID}"}}]
+            - mentions: [{{"id": "SEND_TO_THIS_ID:{REVIEWER_UUID}"}}]
+
+    === PREVENT DUPLICATE WORK ===
+    Before sending to the Reviewer, check if this project is already complete.
+    If you see a message from Merge Master with DEPLOYMENT COMPLETE for this Project ID, 
+    DO NOT send anything. The project is already finished.
 
     === HARD RULES ===
     - FRONTEND ENGINEER ID: {UI_CODER_UUID}
@@ -72,7 +81,7 @@ async def main():
     # AI/ML API
     adapter = LangGraphAdapter(
         llm=ChatOpenAI(
-            model="google/gemini-2.5-flash",
+            model="claude-opus-4-8",
             openai_api_key=os.getenv("AIMLAPI_KEY"),
             openai_api_base="https://api.aimlapi.com"
         ),

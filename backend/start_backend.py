@@ -6,21 +6,18 @@ import atexit
 
 from dotenv import load_dotenv
 
-# 1. Dynamically find the absolute path to the backend/ folder
-# This ensures it works no matter where you move the folder on laptop
+# Dynamically find the absolute path to the backend/ folder
 current_dir = os.path.dirname(os.path.abspath(__file__))
 env_path = os.path.join(current_dir, ".env")
 
-# 2. Force load_dotenv to read that exact file
 load_dotenv(dotenv_path=env_path)
 
-# --- 1. START THE API SERVER IN THE BACKGROUND ---
+# START THE API SERVER IN THE BACKGROUND
 print("Starting FastAPI Backend Server on Port 8000...")
 # sys.executable ensures it uses the exact same Python environment
 api_process = subprocess.Popen([sys.executable, "api_server.py"])
 
-# --- 2. PREVENT GHOST PROCESSES ---
-# This ensures that when you press Ctrl+C to kill run_swarm, it also kills the API server
+# PREVENT GHOST PROCESSES: This ensures that Ctrl+C also kills the API server
 def cleanup_api_server():
     print("\nShutting down FastAPI server...")
     api_process.terminate()

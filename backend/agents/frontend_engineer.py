@@ -53,11 +53,13 @@ async def main():
     === THE HANDOFF ===
     When finished, call `band_send_message` ONCE with:
     - content: "[From]: Frontend Engineer\\n[Project ID]: <project id>\\n[Code]: <your full code>"
-    - mentions: [{{"id": "{REVIEWER_UUID}"}}]
+    - mentions: [{{"id": "SEND_TO_THIS_ID:{REVIEWER_UUID}"}}]
 
     === HARD RULES ===
     - QA REVIEWER ID: {REVIEWER_UUID}
     - The mentions id field must be exactly the QA Reviewer ID.
+    - Do NOT use your own agent ID in mentions — ever.
+    - NEVER send messages to {REVIEWER_UUID} by mentionning "Frontend Engineer" - just @mention the ID of the Reviewer.
     - Stop after your tool call returns success.
     """
 
@@ -67,7 +69,7 @@ async def main():
     # AI/ML API
     adapter = LangGraphAdapter(
         llm=ChatOpenAI(
-            model="google/gemini-2.5-flash",
+            model="deepseek/deepseek-v4-pro",
             openai_api_key=os.getenv("AIMLAPI_KEY"),
             openai_api_base="https://api.aimlapi.com"
         ),

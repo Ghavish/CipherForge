@@ -50,7 +50,7 @@ async def main():
     === THE HANDOFF ===
     When finished, call `band_send_message` ONCE with:
     - content: "[From]: Backend Engineer\\n[Project ID]: <project id>\\n[Code]: <your full code>"
-    - mentions: [{{"id": "{REVIEWER_UUID}"}}]
+    - mentions: [{{"id": "SEND_TO_THIS_ID:{REVIEWER_UUID}"}}]
 
     === HARD RULES ===
     - QA REVIEWER ID: {REVIEWER_UUID}
@@ -65,7 +65,7 @@ async def main():
     # AI/ML API
     adapter = LangGraphAdapter(
         llm=ChatOpenAI(
-            model="google/gemini-2.5-pro",
+            model="deepseek/deepseek-v4-pro",
             openai_api_key=os.getenv("AIMLAPI_KEY"),
             openai_api_base="https://api.aimlapi.com"
         ),

@@ -1,6 +1,8 @@
 import os
 import sys
 import asyncio
+import json
+from datetime import datetime
 
 from thenvoi import Agent
 from thenvoi.adapters import LangGraphAdapter
@@ -13,7 +15,64 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from tools.config_parser import get_target_agent_id
 from tools.db import append_log
 
-# --- CUSTOM LOGGING TOOL ---
+# --- Memory tracking ---
+REVIEW_MEMORY = {}  # project_id -> {review_count, last_review_time, issues_found, status}
+
+@tool
+def log_progress(project_id: str, stage: str, message: str) -> str:
+    """Use this tool to log your progress to the system UI."""
+    append_log(project_id, stage, message)
+    return "Log successfully saved to the UI."
+
+# --- Memory management tool ---
+REVIEW_STATE = {}
+
+def get_review_state(project_id: str) -> str:
+    """
+    Get the current review state for a project to prevent duplicate reviews.
+    Returns JSON with: {review_count, status, last_issue, last_review_time}
+    """
+    if project_id not in REVIEW_STATE:
+        REVIEW_STATE[project_id] = {
+            "review_count": 0,
+            "status": "new",
+            "last_issue": None,
+            "last_review_time": None,
+            "reviewed_code_hash": None
+        }
+    return json.dumps(REVIEW_STATE[project_id])
+
+@tool
+def update_review_state(project_id: str, status: str, issue: str = "", code_hash: str = "") -> str:
+    """
+    Update the review state after reviewing code.
+    """
+    if project_id not in REVIEW_STATE:
+        REVIEW_STATE[project_id] = {"review_count": 0}
+    
+    REVIEW_STATE[project_id]["review_count"] += 1
+    REVIEW_STATE[project_id]["status"] = status
+    REVIEW_STATE[project_id]["last_issue"] = issue
+    REVIEW_STATE[project_id]["last_review_time"] = datetime.now().isoformat()
+    if code_hash:
+        REVIEW_STATE[project_id]["reviewed_code_hash"] = code_hash
+    return f"Review state updated: {status} (count: {REVIEW_STATE[project_id]['review_count']})"
+
+@tool
+def should_auto_approve(project_id: str) -> str:
+    """
+    Check if a project has been reviewed too many times and should auto-approve.
+    Returns "AUTO_APPROVE" if review_count >= 3, otherwise "CONTINUE".
+    """
+    if project_id not in REVIEW_STATE:
+        REVIEW_STATE[project_id] = {"review_count": 0}
+    
+    review_count = REVIEW_STATE[project_id]["review_count"]
+    if review_count >= 3:
+        return f"AUTO_APPROVE: Project has been reviewed {review_count} times. Auto-approving to prevent infinite loop."
+    return f"CONTINUE: Review {review_count + 1} of 3."
+
+# --- LOGGING TOOL ---
 @tool
 def log_progress(project_id: str, stage: str, message: str) -> str:
     """Use this tool to log your progress to the system UI. 
@@ -24,7 +83,6 @@ def log_progress(project_id: str, stage: str, message: str) -> str:
     """
     append_log(project_id, stage, message)
     return "Log successfully saved to the UI."
-# --------------------------------------
 
 async def main():
     UI_CODER_UUID = get_target_agent_id("frontend_engineer")
@@ -34,44 +92,80 @@ async def main():
     custom_prompt = f"""
     You are the QA Reviewer. You are the final gatekeeper before deployment.
 
-    === HOW TO READ YOUR STATE ===
-    You do NOT have an external database. You must read the chat history to know what has been submitted for a [Project ID]. 
-    Every time you are triggered, you must perform this mental checklist:
-    1. Did the Architect explicitly say "NO BACKEND REQUIRED" for this ID?
-    2. Is the Frontend Code in the chat history?
-    3. Is the Backend Code in the chat history?
+    === TOOL AVAILABILITY ===
+    You have these tools available:
+    1. get_review_state(project_id) - Check review history
+    2. update_review_state(project_id, status, issue) - Update review status
+    3. should_auto_approve(project_id) to check if you should auto-approve.
+    3. log_progress(project_id, stage, message) - Log progress
+    4. band_send_message(content, mentions) - Send messages
 
-    === STEP 1: AGGREGATION ===
+    If `should_auto_approve` returns "AUTO_APPROVE", you MUST:
+    - Skip all review logic
+    - Call `update_review_state` with status="auto_approved"
+    - Call `log_progress` with message "[QA Reviewer] Auto-approved after 3+ review cycles"
+    - Call `band_send_message` to send to Merge Master with the code
+    - STOP
+
+    === MEMORY SYSTEM ===
+    You now have a memory system to prevent infinite review loops:
+    1. ALWAYS call `get_review_state` first to check if you've already reviewed this project
+    2. If review_count >= 2 AND the same code is submitted, AUTO-APPROVE and proceed
+    3. Track what issues you've already raised
+
+    === HOW TO READ YOUR STATE ===
+    You do NOT have an external database. You must:
+    1. First call `get_review_state` to check review history
+    2. Then read the chat history to know what has been submitted
+
+    === REVIEW COUNT LOGIC (CRITICAL) ===
+    - review_count = 0: First review. Do thorough analysis.
+    - review_count = 1: Second review. Check only if fixes were applied.
+    - review_count >= 2: AUTO-APPROVE. The team has tried enough.
+
+    === STEP 1: CHECK HISTORY ===
+    ALWAYS start by calling `get_review_state(project_id)` to see:
+    - How many times you've reviewed this project
+    - What issues you raised last time
+    - The current status
+
+    === STEP 2: AGGREGATION ===
     - IF the project is Full-Stack AND you only see ONE submission: 
-      DO NOT USE ANY TOOLS. Reply in standard text: "Reviewer received [From] submission for [Project ID]. Waiting for the other."
+      Reply: "Reviewer received [From] submission for [Project ID]. Waiting for the other."
       
     - IF the project is Frontend-Only AND you have the Frontend code: 
-      Proceed immediately to Step 2.
+      Proceed to Step 3.
       
-    - IF the project is Full-Stack AND you have BOTH submissions in the chat history: 
-      Proceed immediately to Step 2.
+    - IF the project is Full-Stack AND you have BOTH submissions: 
+      Proceed to Step 3.
 
-    === STEP 2: EVALUATION (WHEN COMPLETE) ===
-    Once you have all required code, review it for logic errors, missing endpoints, or fatal syntax issues.
-    You must decide to either APPROVE or REJECT.
+    === STEP 3: REVIEW LOGIC ===
+    If review_count >= 2:
+        - AUTO-APPROVE immediately with note: "Auto-approved after multiple review cycles"
+        - Auto-approve to prevent loops.
+    
+    If review_count == 1:
+        - Only check if previous issues were fixed
+        - If fixed: APPROVE
+        - If not fixed: REJECT with reminder of previous feedback
+    
+    If review_count == 0:
+        - Do full review
+        - Check for critical security issues (eval(), XSS, SQL injection)
+        - Check for logic errors
+        - Check for missing features
 
-    --- IF YOU REJECT (MANDATORY TOOLS) ---
-    If the code is flawed, you must send it back for revision.
-    1. Call `log_progress`:
-       - project_id: The ID you received.
-       - stage: "Coding" (Sending it back to the coding stage)
-       - message: "[QA Reviewer] Code rejected. Requesting revisions from engineering."
-    2. Call `band_send_message` ONCE:
-       - content: "[From]: QA Reviewer\\n[Project ID]: <id>\\n[Status]: REJECTED\\n[Feedback]: <Detailed explanation of what needs fixing>"
-       - mentions: Use [{{"id": "{UI_CODER_UUID}"}}] if UI needs fixing, OR [{{"id": "{BACKEND_CODER_UUID}"}}] if backend needs fixing. (You can mention both if needed).
+    === IF YOU REJECT ===
+    1. Call `update_review_state`: status="rejected", issue="<brief description>"
+    2. Call `log_progress`: stage="Coding", message="[QA Reviewer] Code rejected. Requesting revisions."
+    3. Call `band_send_message`:
+       - content: "[From]: QA Reviewer\\n[Project ID]: <id>\\n[Status]: REJECTED\\n[Feedback]: <specific fixes needed>"
+       - mentions: [{{"id": "{UI_CODER_UUID}"}}] or [{{"id": "{BACKEND_CODER_UUID}"}}]
 
-    --- IF YOU APPROVE (MANDATORY TOOLS) ---
-    If the code looks solid, you must hand it off.
-    1. Call `log_progress`:
-       - project_id: The ID you received.
-       - stage: "QA Review"
-       - message: "[QA Reviewer] Codebase passed review. Aggregated and approved for merge."
-    2. Call `band_send_message` ONCE:
+    === IF YOU APPROVE ===
+    1. Call `update_review_state`: status="approved"
+    2. Call `log_progress`: stage="QA Review", message="[QA Reviewer] Codebase passed review. Approved for merge."
+    3. Call `band_send_message`:
        - content: "[From]: QA Reviewer\\n[Project ID]: <id>\\n[Status]: Approved\\n[Frontend Code]: <paste full frontend code>\\n[Backend Code]: <paste full backend code OR 'NONE'>"
        - mentions: [{{"id": "{MERGEMASTER_UUID}"}}]
 
@@ -85,6 +179,8 @@ async def main():
     - MERGE MASTER ID: {MERGEMASTER_UUID}
     - The mentions id field must be exactly: {MERGEMASTER_UUID}
     - Never use your own agent ID in mentions.
+    - If review_count >= 2, you MUST auto-approve to prevent loops.
+    - ALWAYS call `get_review_state` first before doing anything else.
     - If you are approving the code, `band_send_message` is mandatory.
     """
 
@@ -94,12 +190,12 @@ async def main():
     # AI/ML API
     adapter = LangGraphAdapter(
         llm=ChatOpenAI(
-            model="google/gemini-2.5-pro",
+            model="claude-opus-4-8",
             openai_api_key=os.getenv("AIMLAPI_KEY"),
             openai_api_base="https://api.aimlapi.com"
         ),
         custom_section=custom_prompt,
-        additional_tools=[log_progress]
+        additional_tools=[log_progress, get_review_state, update_review_state, should_auto_approve]
     )
     
     # Featherless API
