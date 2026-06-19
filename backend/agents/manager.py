@@ -16,6 +16,9 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from tools.config_parser import get_target_agent_id
 from tools.db import append_log
 
+import langchain
+langchain.debug = True
+
 # ---------- CUSTOM TOOLS ----------
 @tool(description="Log progress to the system UI.")
 def log_progress(project_id: str, stage: str, message: str) -> str:
@@ -154,6 +157,11 @@ def send_delegation_message(room_id: str, content: str, recipient_id: str, recip
         }
     }
 
+    # 🔴 THE DEBUGGER: Print the exact JSON string before firing
+    print("\n--- OUTBOUND API PAYLOAD ---")
+    print(json.dumps(payload, indent=2))
+    print("----------------------------\n")
+
     try:
         resp = requests.post(url, headers=headers, json=payload, timeout=10)
         if resp.status_code == 201:
@@ -261,9 +269,10 @@ async def main():
         2. You have the NEW_ROOM_ID.
         3. Call the `send_delegation_message` tool:
        - room_id: <NEW_ROOM_ID>
-       - content: "@System Architect Please begin the architecture design for Project [project_id]."
+       - content = [Project ID]: (project_id) [Task]: (task description)
+        Example:[Project ID]: PROJ-5055 [Task]: Build a simple calculator
        - recipient_id: "{ARCHITECT_UUID}"
-       - recipient_name: "System Architect"
+       - recipient_name: "System Architect""
 
     8. Call `set_latest_project(project_id)` to mark this as the latest project.
 
@@ -291,6 +300,9 @@ async def main():
     - NEVER start the same project twice
     - ALWAYS use the NEW_ROOM_ID from the current project
     - NEVER use the current conversation's room ID
+    - ALWAYS use the exact format above when sending to Architect
+    - NO extra text in the content - just the two lines
+    - NEVER ask Architect to submit a new build request
     - If any tool returns an error, report it clearly and STOP
     """
 

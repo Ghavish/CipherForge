@@ -13,6 +13,9 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from tools.config_parser import get_target_agent_id
 from tools.db import append_log
 
+import langchain
+langchain.debug = True
+
 # --- CUSTOM LOGGING TOOL ---
 @tool
 def log_progress(project_id: str, stage: str, message: str) -> str:
@@ -42,10 +45,6 @@ async def main():
     1. Analyze the task. Decide if it requires a backend (e.g., database, auth, server logic). A simple UI app does NOT.
     2. Based on your decision, call `band_send_message` TWICE:
 
-    === ROOM MONITORING ===
-    You are now operating in dynamic War Rooms. 
-    Even if you do not see a message immediately, always check the Room History for @System Architect tags. You are authorized to respond in any room you are added to.
-
     === PROGRESS LOGGING (MANDATORY) ===
     Before sending your specs, you MUST use the `log_progress` tool:
     - project_id: The ID you received.
@@ -72,6 +71,8 @@ async def main():
     - BACKEND ENGINEER ID:  {BACKEND_CODER_UUID}
     - QA REVIEWER ID:       {REVIEWER_UUID}
     - Never use your own agent ID in mentions.
+    - You do NOT need to check room participants.
+    - Just respond to the Manager's message and delegate.
     - Stop after your two tool calls return success.
     """
 
@@ -81,7 +82,7 @@ async def main():
     # AI/ML API
     adapter = LangGraphAdapter(
         llm=ChatOpenAI(
-            model="claude-opus-4-8",
+            model="deepseek/deepseek-v4-flash",
             openai_api_key=os.getenv("AIMLAPI_KEY"),
             openai_api_base="https://api.aimlapi.com"
         ),
